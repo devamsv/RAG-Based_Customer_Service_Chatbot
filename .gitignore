@@ -1,0 +1,72 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Streamlit
+.streamlit/
+*.streamlit.run
+
+# Logs
+*.log
+logs/
+
+# Database/Cache
+*.db
+*.sqlite3
+chroma_db/
+.faiss_db/
+*.pkl
+*.pickle
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+.tmp/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+# Vector DB indexes should not be committed (generated locally)
+vectorstore/
+vector_store/
+embeddings/
+models/
+
+# IDE specific
+.vscode/settings.json
+.idea/*
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+build/
+dist/
+*.egg-info/
