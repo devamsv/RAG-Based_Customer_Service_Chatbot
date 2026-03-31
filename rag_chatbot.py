@@ -4,12 +4,14 @@ Customer Support Chatbot with Streamlit UI.
 Dataset-based Retrieval-Augmented Generation (RAG) using Gemini + HuggingFace embeddings.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import time
 import hashlib
 import re
-from typing import Optional, List, Tuple, Dict, Any
+from typing import List, Tuple, Dict
 
 import streamlit as st
 import pandas as pd
@@ -27,38 +29,41 @@ from utils import (
     truncate_text,
     ensure_directory_exists
 )
-# Setup logging
+
+# ----------------------------
+# Setup
+# ----------------------------
 logger = setup_logging(config.LOG_LEVEL)
 
-# Validate configuration early and fail fast in the UI
-if not config.GOOGLE_API_KEY:
-    logger.error("GOOGLE_API_KEY not found in environment variables")
-    st.error("GOOGLE_API_KEY not configured. Please set it in your .env file.")
-    st.stop()
 
-# Page configuration
-st.set_page_config(
-    page_title=config.PAGE_TITLE,
-    page_icon=config.PAGE_ICON,
-    layout=config.LAYOUT
-)
-
-# Initialize session state
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'pending_question' not in st.session_state:
-    st.session_state.pending_question = None
-if 'satisfaction' not in st.session_state:
-    # Map: assistant_index(str) -> rating_value(float in [0,1])
-    st.session_state.satisfaction = {}
+def init_page() -> None:
+    st.set_page_config(
+        page_title=config.PAGE_TITLE,
+        page_icon=config.PAGE_ICON,
+        layout=config.LAYOUT,
+    )
 
 
-# Streamlit UI
-st.title(f"{config.PAGE_ICON} {config.PAGE_TITLE}")
-st.subheader("Ask your query about orders / refund / login etc")
-st.caption("Answers are generated using the Customer Support dataset and Gemini.")
+def init_session_state() -> None:
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "pending_question" not in st.session_state:
+        st.session_state.pending_question = None
+    if "satisfaction" not in st.session_state:
+        # Map: assistant_index(str) -> rating_value(float in [0,1])
+        st.session_state.satisfaction = {}
 
-# ---------- Data + RAG helpers ----------
+
+def validate_env() -> None:
+    if not config.GOOGLE_API_KEY:
+        logger.error("GOOGLE_API_KEY not found in environment variables")
+        st.error("GOOGLE_API_KEY not configured. Please set it in your .env file.")
+        st.stop()
+
+
+# ----------------------------
+# Data loading + preprocessing
+# ----------------------------
 @st.cache_data(show_spinner=False)
 def load_customer_support_df(csv_path: str) -> pd.DataFrame:
     if not os.path.exists(csv_path):
@@ -76,6 +81,9 @@ def load_customer_support_df(csv_path: str) -> pd.DataFrame:
     return df
 
 
+# ----------------------------
+# Models (embeddings + LLM)
+# ----------------------------
 @st.cache_resource(show_spinner=False)
 def get_embedding_model() -> HuggingFaceEmbeddings:
     # Requirement: REAL embeddings
@@ -112,6 +120,9 @@ Answer:"""
     return prompt | get_llm() | StrOutputParser()
 
 
+# ----------------------------
+# Metrics helpers
+# ----------------------------
 def _distance_to_relevance(distance: float) -> float:
     # FAISS "score" is typically a distance (smaller is better).
     # Convert to a [0..1]-like relevance proxy.
@@ -140,6 +151,9 @@ def compute_precision_recall(
     return {"precision": precision, "recall": recall, "f1": f1}
 
 
+# ----------------------------
+# Vector store (FAISS) build/load
+# ----------------------------
 def build_documents_from_subset(df_subset: pd.DataFrame) -> List[Document]:
     """
     Create FAISS documents from the CSV answers.
@@ -211,6 +225,9 @@ def get_vectorstore_for_categories(categories: Tuple[str, ...]) -> Tuple[FAISS, 
     return vectorstore, False
 
 
+# ----------------------------
+# RAG answer + metrics
+# ----------------------------
 def answer_with_metrics(
     query: str,
     vectorstore: FAISS,
@@ -259,60 +276,62 @@ def answer_with_metrics(
         },
     }
 
+# ----------------------------
+# UI helpers
+# ----------------------------
+def render_header() -> None:
+    st.title(f"{config.PAGE_ICON} {config.PAGE_TITLE}")
+    st.subheader("Ask your query about orders / refund / login etc")
+    st.caption("Answers are generated using the Customer Support dataset and Gemini.")
 
-# ---------- Sidebar ----------
-with st.sidebar:
-    st.markdown("---")
 
-    st.header("🎛️ Category Filter")
-    try:
-        df = load_customer_support_df(config.CUSTOMER_SUPPORT_CSV_PATH)
+def render_sidebar(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
+    with st.sidebar:
+        st.markdown("---")
+        st.header("🎛️ Category Filter")
         categories = sorted(df["category"].unique().tolist())
-    except Exception as e:
-        st.error(f"Dataset error: {e}")
-        st.stop()
+        selected_categories = st.multiselect(
+            "Choose categories",
+            options=categories,
+            default=categories,
+            help="Filter the dataset used for retrieval.",
+        )
 
-    selected_categories = st.multiselect(
-        "Choose categories",
-        options=categories,
-        default=categories,
-        help="Filter the dataset used for retrieval.",
-    )
+        st.header("🧩 Sample Questions")
+        sample_questions = [
+            "How can I track my order?",
+            "What is the return process?",
+            "How do I request a refund?",
+            "I forgot my password. What should I do?",
+            "How do I update my shipping address?",
+            "Can I cancel my order?",
+        ]
+        for q in sample_questions:
+            if st.button(q, use_container_width=True):
+                st.session_state.pending_question = q
+                st.rerun()
 
-    st.header("🧩 Sample Questions")
-    sample_questions = [
-        "How can I track my order?",
-        "What is the return process?",
-        "How do I request a refund?",
-        "I forgot my password. What should I do?",
-        "How do I update my shipping address?",
-        "Can I cancel my order?",
-    ]
-    for q in sample_questions:
-        if st.button(q, use_container_width=True):
-            st.session_state.pending_question = q
+        st.markdown("---")
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.chat_history = []
+            st.session_state.pending_question = None
+            st.session_state.satisfaction = {}
             st.rerun()
 
-    st.markdown("---")
+    return categories, selected_categories
 
-    if st.button("🗑️ Clear Chat History"):
-        st.session_state.chat_history = []
-        st.session_state.pending_question = None
-        st.rerun()
 
-# Main chat interface
-st.markdown("---")
-st.subheader("💬 Customer Support Q&A")
-st.caption("Type your question in the chat box below (filtered by selected categories).")
+def render_chat_history() -> None:
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-# Display chat history
-for message in st.session_state.chat_history:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
 
-# User satisfaction score (subjective, collected via UI)
-assistant_count = sum(1 for m in st.session_state.chat_history if m.get("role") == "assistant")
-if assistant_count > 0:
+def render_satisfaction_widget() -> None:
+    assistant_count = sum(1 for m in st.session_state.chat_history if m.get("role") == "assistant")
+    if assistant_count <= 0:
+        return
+
     assistant_index = str(assistant_count - 1)
     rating_options = ["Not rated", "Helpful", "Not helpful"]
 
@@ -349,16 +368,59 @@ if assistant_count > 0:
             }
         )
 
-# If user clicked a sample question, process it as if it was submitted.
-question_from_button = st.session_state.pending_question
-if question_from_button is not None:
-    st.session_state.pending_question = None
-    question = question_from_button
-else:
-    question = st.chat_input("Ask about orders / refund / login ...")
 
-if question:
-    # Add user message to chat
+def get_question_input() -> str | None:
+    question_from_button = st.session_state.pending_question
+    if question_from_button is not None:
+        st.session_state.pending_question = None
+        return question_from_button
+    return st.chat_input("Ask about orders / refund / login ...")
+
+
+def render_footer() -> None:
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center'>
+            <p style='color: #888; font-size: 0.9em;'>
+                Built with LangChain, Streamlit, and Gemini
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ----------------------------
+# Main
+# ----------------------------
+def main() -> None:
+    init_page()
+    init_session_state()
+    validate_env()
+
+    render_header()
+
+    try:
+        df = load_customer_support_df(config.CUSTOMER_SUPPORT_CSV_PATH)
+    except Exception as e:
+        st.error(f"Dataset error: {e}")
+        st.stop()
+
+    categories, selected_categories = render_sidebar(df)
+
+    st.markdown("---")
+    st.subheader("💬 Customer Support Q&A")
+    st.caption("Type your question in the chat box below (filtered by selected categories).")
+
+    render_chat_history()
+    render_satisfaction_widget()
+
+    question = get_question_input()
+    if not question:
+        render_footer()
+        return
+
     st.session_state.chat_history.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
@@ -373,6 +435,7 @@ if question:
                 answer = result["answer"]
 
                 st.markdown(answer)
+
                 if config.SHOW_SOURCES:
                     with st.expander("📚 View Sources"):
                         for i, doc in enumerate(result["source_documents"], 1):
@@ -405,15 +468,7 @@ if question:
                 st.error(error_msg)
                 st.session_state.chat_history.append({"role": "assistant", "content": error_msg})
 
-# Footer
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center'>
-        <p style='color: #888; font-size: 0.9em;'>
-            Built with LangChain, Streamlit, and Gemini
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+    render_footer()
+
+
+main()

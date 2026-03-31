@@ -42,7 +42,7 @@ class Config:
     VECTOR_STORE_DIR: str = "vector_store"
     
     # UI Settings
-    PAGE_TITLE: str = "Customer Support Chatbot"
+    PAGE_TITLE: str = "Customer Support RAG Based Chatbot"
     PAGE_ICON: str = "🤖"
     LAYOUT: str = "wide"
     
